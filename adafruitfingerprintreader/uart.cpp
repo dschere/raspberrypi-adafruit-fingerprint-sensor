@@ -130,7 +130,8 @@ int HardwareSerial::open(char* device)
 {
     if ((uart0_filestream = 
            ::open(device, O_RDWR | O_NOCTTY | O_NDELAY)) == -1) {
-        fprintf(stderr,"Unable to open ttyAMA0 errno=%d %s",errno, strerror(errno)); 
+        fprintf(stderr,"Unable to open ttyAMA0 errno=%d %s",
+            errno, strerror(errno)); 
     }
     return (uart0_filestream == -1) ? -1: 0;
 }
@@ -148,6 +149,9 @@ void HardwareSerial::close()
 
 
 /*
+
+// code is based on this raspberry pi UART example below: 
+
 #include <stdio.h>
 #include <unistd.h>			//Used for UART
 #include <fcntl.h>			//Used for UART

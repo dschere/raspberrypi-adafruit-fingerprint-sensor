@@ -103,10 +103,15 @@ fp_getimage(PyObject* self, PyObject *args)
     int slot=1; // default in adafruit code
     int rcode;
     PyObject* exc = NULL;
+    int timeout = 10;
+    time_t expire, now;
 
-    if (!PyArg_ParseTuple(args, "|i", &slot))
+    if (!PyArg_ParseTuple(args, "|ii", &slot, &timeout))
         return NULL;
     
+
+    time(&now);
+    expire = now + timeout;
     // get fingerprint image
     do 
     {
@@ -115,6 +120,12 @@ fp_getimage(PyObject* self, PyObject *args)
         {
             return exc;
         } 
+
+        time(&now);
+        if ( now > expire ) {
+            PyErr_SetString(PyExc_TimeoutError,"timeout waiting for image"); 
+            return PyExc_TimeoutError;           
+        }
     }while( rcode != FINGERPRINT_OK );
 
     // convert image
@@ -192,10 +203,15 @@ fp_matchmodel(PyObject* self, PyObject* args)
     time(&now);
     expire = now + timeout;
 
-    while (now < expire){
+    while (1){
+
         time(&now);
+        if ( now > expire ) {
+            PyErr_SetString(PyExc_TimeoutError,"timeout waiting for image");
+            return PyExc_TimeoutError;
+        }
+
         rcode = AFP.getImage();
-printf("AFP.getImage() -> %d\n", rcode);
         if (rcode == FINGERPRINT_NOFINGER) {
             // user is not pressing the sensor
             sleep(1);
@@ -209,7 +225,8 @@ printf("AFP.getImage() -> %d\n", rcode);
         else if (check(rcode,FINGERPRINT_OK,&exc) == -1 && exc)
         {
             return exc;     
-        }    
+        }
+    
     }
   
     if (
@@ -294,7 +311,7 @@ static PyMethodDef FPSensorMethods[] = {
     {"matchModel",fp_matchmodel,  METH_VARARGS, "matchModel(timeout) -> (matched,id,confidence)"},
     {"createModel",fp_createmodel, METH_VARARGS, "createModel(id): associate fp image with id."},
     {"fingerRelease", fp_wait_for_no_finger, METH_VARARGS, "wait until finger not on sensor"}, 
-    {"captureImage", fp_getimage, METH_VARARGS, "get image and store in a buffer"},
+    {"captureImage", fp_getimage, METH_VARARGS, "captureImage(slot=1,timeout=10); get image and store in a buffer"},
 
     {"setup", fp_setup, METH_VARARGS, "setup( device=/dev/ttyAMA0, baud=57600 );"},
     {NULL, NULL, 0, NULL}        /* Sentinel */
