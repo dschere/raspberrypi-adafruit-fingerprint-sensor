@@ -3,6 +3,9 @@
 #include <poll.h>
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
+
+
 
 /*
 
@@ -19,11 +22,22 @@ public:
     int read();
 };
 
+class FakeSerial
+{
+public:
+    void println(char* msg);
+    void print(char *msg);
+}
+
+
 */
+
+
 
 int  HardwareSerial::read()
 {
     unsigned char b=0;
+    
     int len = ::read( uart0_filestream, (void*) &b, 1 );
     if ( len != 1 ) {
         fprintf(stderr,"Unable to read from uart!\n");
@@ -36,6 +50,22 @@ printf("recv --> len=%d, 0x%02X\n", len, b);
 #endif
     return (len == 1)? (int)b: 0;
 }
+
+void HardwareSerial::print(const char* msg) 
+{ 
+    printf("%s",msg); 
+}
+
+void HardwareSerial::println(const char* msg)
+{
+    printf("%s\n", msg);
+}
+
+void HardwareSerial::println(uint8_t msg)
+{
+    printf("%d\n", msg);
+}
+
 
 void HardwareSerial::print(uint8_t ch, int sz)
 {

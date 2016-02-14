@@ -10,6 +10,8 @@
 #define boolean unsigned char
 #define BYTE 1
 
+void delay(int milli);
+
 class HardwareSerial
 {
     int uart0_filestream;
@@ -20,6 +22,10 @@ public:
 
     void begin(unsigned long baud);
     void print(uint8_t ch, int sz);
+    void println(uint8_t ch);
+    void println(const char* msg);
+    void print(const char* msg);
+
     void write(uint8_t ch);
     int read();    
     int available();
@@ -31,6 +37,11 @@ public:
     void close();
     
 };
+
+
+
+
+
 
 
 

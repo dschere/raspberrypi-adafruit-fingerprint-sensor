@@ -20,6 +20,7 @@
   #include <stdint.h>
   #include "uart.h"// workaround implementation of HardwareSerial 
 
+void delay(int n);
 
 #else
   #include "Arduino.h"

@@ -1,6 +1,7 @@
 #include <Python.h>
 
 #include "Adafruit_Fingerprint.h"
+#include "enroll.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,7 @@
 */
 static PyObject* FpSensorError = NULL;
 static PyObject* CommunicationError = NULL;
+
 
 static char* fpsensor_doc = (char*) "Interface to Adafruit fingerprint sensor";
 
@@ -117,24 +119,29 @@ fp_getimage(PyObject* self, PyObject *args)
     {
         rcode = AFP.getImage();
         if (check(rcode,FINGERPRINT_OK,&exc)==-1 && exc)
-        {
+        { 
             return exc;
         } 
-
+        rcode = AFP.image2Tz( slot );      
+          
+        
         time(&now);
         if ( now > expire ) {
+            fprintf(stderr,"timeout in fp_getImage\n");
             PyErr_SetString(PyExc_TimeoutError,"timeout waiting for image"); 
             return PyExc_TimeoutError;           
         }
+        usleep( 1000 );
     }while( rcode != FINGERPRINT_OK );
 
+/*
     // convert image
     rcode = AFP.image2Tz( slot );
     if (check(rcode,FINGERPRINT_OK,&exc)==-1 && exc)
     {
         return exc;
     }
-
+*/
     return Py_BuildValue("");
 }
 
@@ -192,9 +199,24 @@ fp_createmodel(PyObject* self, PyObject* args)
 static PyObject*
 fp_matchmodel(PyObject* self, PyObject* args)
 {
-    int timeout=10;
-    time_t expire, now;
-    int rcode;
+    //int timeout=10;
+    //time_t expire, now;
+    //int rcode;
+
+    if (
+        (AFP.getImage()       == FINGERPRINT_OK) &&
+        (AFP.image2Tz()       == FINGERPRINT_OK) &&
+        (AFP.fingerFastSearch() == FINGERPRINT_OK)
+       )
+    {
+        return Py_BuildValue("(i,i,i)", 1, AFP.fingerID, AFP.confidence);
+    } 
+    else
+    {
+        return Py_BuildValue("(i,i,i)", 0, 0, 0 );
+    }
+
+/*
     PyObject* exc=NULL;
 
     if (!PyArg_ParseTuple(args, "i", &timeout))
@@ -245,6 +267,8 @@ fp_matchmodel(PyObject* self, PyObject* args)
     {
         return exc;
     }
+*/
+
 }
 
 static PyObject*fp_deleteModel(PyObject* self, PyObject* args)
@@ -281,34 +305,96 @@ fp_getTemplate(PyObject* self, PyObject* args)
     uint8_t templateBuffer[256];
     int index;
     PyObject* exc=NULL; 
-
+    int timeout = 2;
+    time_t now, expire;
+ 
     memset(templateBuffer, 0xff, 256);  //zero out template buffer
 
-    if (!PyArg_ParseTuple(args, "i", &id))
+    if (!PyArg_ParseTuple(args, "i|i", &id,&timeout))
         return NULL;
 
     if (check(AFP.loadModel(id),FINGERPRINT_OK,&exc)==-1)
-        return exc;
+        return (exc) ? exc : Py_BuildValue("");
     if (check(AFP.getModel(),FINGERPRINT_OK,&exc)==-1)
-        return exc;
+        return (exc) ? exc : Py_BuildValue("");
   
+    time( &now );
+    expire = now + timeout;
     // read a stream of bytes representing the 16x16 fingerprint template.  
-    for(index = 0; index < 256; index++)
+    for(index = 0; index < 256;)
     {
-        if (HS.available()){
-            templateBuffer[index] = (uint8_t) HS.read();  
+        if ( HS.available() ){
+            int r = HS.read();
+ 
+            templateBuffer[index] = (uint8_t) r;
+            index++;
+        } 
+
+        time(&now);
+        if ( now > expire ) {
+            PyErr_SetString(PyExc_TimeoutError,"timeout waiting for image");
+            return PyExc_TimeoutError;
         }
+
     }
   
     return Py_BuildValue("y#",templateBuffer,sizeof(templateBuffer));
 }
 
+static PyObject* getFingerprintEnroll_event_cb = NULL;
+
+static void getFingerprintEnroll_emit(const char* event)
+{
+   if ( getFingerprintEnroll_event_cb )
+   {
+      // call python callback within C++
+      PyObject* arglist = Py_BuildValue("(s)", event);
+      PyObject* result = 
+          PyObject_CallObject(getFingerprintEnroll_event_cb, arglist);
+      Py_DECREF(arglist);
+      Py_DECREF(result);
+   }
+}
+
+//uint8_t getFingerprintEnroll(HardwareSerial& Serial, Adafruit_Fingerprint& finger, uint8_t id)
+static PyObject*
+fp_getFingerprintEnroll(PyObject* self, PyObject* args)
+{
+    uint8_t id;
+    int _id;
+    PyObject* result;
+
+    if (!PyArg_ParseTuple(args, "i|O", &_id,&getFingerprintEnroll_event_cb))
+        return NULL;
+
+    id = (uint8_t)_id;
+    
+    if (getFingerprintEnroll_event_cb)
+    {
+       // prevent garbage collector from deleting pythonfunction when it passes out
+       // of scope.
+       Py_INCREF(getFingerprintEnroll_event_cb);
+    }
+
+    result =  Py_BuildValue("i", getFingerprintEnroll( HS, AFP, id, getFingerprintEnroll_emit ));
+
+    if (getFingerprintEnroll_event_cb)
+    {
+       // allow to be garbage collected.
+       Py_DECREF(getFingerprintEnroll_event_cb);
+       // remove stale pointer reference.
+       getFingerprintEnroll_event_cb = NULL;
+    }
+
+    return result;
+}
 
 static PyMethodDef FPSensorMethods[] = {
 //    {"system",  spam_system, METH_VARARGS,  "Execute a shell command."},
+    {"getFingerprintEnroll", fp_getFingerprintEnroll, METH_VARARGS, "enroll example from adafruit."},
     {"deleteModel",fp_deleteModel, METH_VARARGS, "deleteModel(id) delete fingerprint model"},
     {"getTemplate",fp_getTemplate, METH_VARARGS, "getTemplate(id) -> bytes[256] -> 16x16 fpt."},
-    {"matchModel",fp_matchmodel,  METH_VARARGS, "matchModel(timeout) -> (matched,id,confidence)"},
+    {"matchModel",fp_matchmodel,  METH_NOARGS, "matchModel() -> (matched,id,confidence)"},
     {"createModel",fp_createmodel, METH_VARARGS, "createModel(id): associate fp image with id."},
     {"fingerRelease", fp_wait_for_no_finger, METH_VARARGS, "wait until finger not on sensor"}, 
     {"captureImage", fp_getimage, METH_VARARGS, "captureImage(slot=1,timeout=10); get image and store in a buffer"},
