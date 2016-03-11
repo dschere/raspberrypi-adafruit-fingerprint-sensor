@@ -69,6 +69,7 @@ void delay(int n);
 #define FINGERPRINT_STORE 0x06
 #define FINGERPRINT_LOAD 0x07
 #define FINGERPRINT_UPLOAD 0x08
+#define FINGERPRINT_MODEL_XFER 0x09 // from host computer --> sensor upload model
 #define FINGERPRINT_DELETE 0x0C
 #define FINGERPRINT_EMPTY 0x0D
 #define FINGERPRINT_VERIFYPASSWORD 0x13
@@ -97,6 +98,7 @@ class Adafruit_Fingerprint {
   uint8_t emptyDatabase(void);
   uint8_t storeModel(uint16_t id);
   uint8_t loadModel(uint16_t id);
+  uint8_t uploadModel(uint16_t id, uint8_t* model, uint16_t len);
   uint8_t getModel(void);
   uint8_t deleteModel(uint16_t id);
   uint8_t fingerFastSearch(void);

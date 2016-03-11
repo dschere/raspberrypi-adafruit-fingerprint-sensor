@@ -11,14 +11,17 @@
 /**
     python extension api
 */
+
+static HardwareSerial HS;
+static Adafruit_Fingerprint AFP( &HS );
+
+
 static PyObject* FpSensorError = NULL;
 static PyObject* CommunicationError = NULL;
 
 
 static char* fpsensor_doc = (char*) "Interface to Adafruit fingerprint sensor";
 
-static HardwareSerial HS;
-static Adafruit_Fingerprint AFP( &HS );
 
 
 static int check( int errcode, int expected, PyObject** exc ) 
@@ -105,7 +108,7 @@ fp_getimage(PyObject* self, PyObject *args)
     int slot=1; // default in adafruit code
     int rcode;
     PyObject* exc = NULL;
-    int timeout = 10;
+    int timeout = 3;
     time_t expire, now;
 
     if (!PyArg_ParseTuple(args, "|ii", &slot, &timeout))
@@ -297,9 +300,92 @@ static PyObject*fp_deleteModel(PyObject* self, PyObject* args)
     return r;
 }
 
+static PyObject*
+fp_uploadTemplate(PyObject* self, PyObject* args)
+{
+    int id;
+    uint8_t* templateBuffer;
+    int size, i, r;
+    PyObject* list;
+    
+
+    if (!PyArg_ParseTuple(args, "iO", &id,&list))
+        return NULL;
+    
+    templateBuffer = (uint8_t*) malloc( PyList_Size(list) ); 
+    for (i = 0; i < PyList_Size(list); i++){
+        uint8_t ch = (uint8_t) PyLong_AsLong( PyList_GET_ITEM( list, i ) );
+        templateBuffer[i] = ch;
+    }
+
+    r = AFP.uploadModel(id, templateBuffer, PyList_Size(list) );
+    free( templateBuffer );
+    return Py_BuildValue("i",r);
+}
 
 static PyObject* 
 fp_getTemplate(PyObject* self, PyObject* args)
+{
+    int id;
+    int index;
+    PyObject* exc=NULL; 
+    int timeout = 2;
+    time_t now, expire;
+    PyObject* model;
+    uint8_t packet[256];
+    int i; 
+
+    //memset(templateBuffer, 0xff, 256);  //zero out template buffer
+
+    if (!PyArg_ParseTuple(args, "i|i", &id,&timeout))
+        return NULL;
+
+    if (check(AFP.loadModel(id),FINGERPRINT_OK,&exc)==-1)
+        return (exc) ? exc : Py_BuildValue("");
+    if (check(AFP.getModel(),FINGERPRINT_OK,&exc)==-1)
+        return (exc) ? exc : Py_BuildValue("");
+  
+    time( &now );
+    expire = now + timeout;
+    model = PyList_New(0);
+
+    // read a stream of bytes representing the 16x16 fingerprint template.  
+    do
+    {
+
+        uint8_t len = AFP.getReply(packet);
+        
+
+        if ( packet[0] == FINGERPRINT_DATAPACKET || packet[0] == FINGERPRINT_ENDDATAPACKET  ) {
+            for(i = 0; i < len; i++)
+                PyList_Append( model, PyLong_FromLong( packet[i] ) );      
+        }
+
+
+//        if ( HS.available() ){
+//            int r = HS.read();
+ 
+//            templateBuffer[index] = (uint8_t) r;
+//            index++;
+//        } 
+
+        time(&now);
+        if ( now > expire ) {
+            PyErr_SetString(PyExc_TimeoutError,"timeout waiting for image");
+            return PyExc_TimeoutError;
+        }
+
+    }while( packet[0] != FINGERPRINT_ENDDATAPACKET  );
+  
+    //HS.reset();
+    
+    //return Py_BuildValue("y#",templateBuffer,sizeof(templateBuffer));
+    return model;
+}
+
+/*
+static PyObject* 
+_fp_getTemplate(PyObject* self, PyObject* args)
 {
     int id;
     uint8_t templateBuffer[256];
@@ -338,8 +424,11 @@ fp_getTemplate(PyObject* self, PyObject* args)
 
     }
   
+    //HS.reset();
+    
     return Py_BuildValue("y#",templateBuffer,sizeof(templateBuffer));
 }
+*/
 
 static PyObject* getFingerprintEnroll_event_cb = NULL;
 
@@ -352,7 +441,8 @@ static void getFingerprintEnroll_emit(const char* event)
       PyObject* result = 
           PyObject_CallObject(getFingerprintEnroll_event_cb, arglist);
       Py_DECREF(arglist);
-      Py_DECREF(result);
+      if ( result ) 
+         Py_DECREF(result);
    }
 }
 
@@ -388,6 +478,91 @@ fp_getFingerprintEnroll(PyObject* self, PyObject* args)
 
     return result;
 }
+/*
+void writePacket(uint32_t addr, uint8_t packettype, uint16_t len, uint8_t *packet);
+  uint8_t getReply(uint8_t packet[], uint16_t timeout=DEFAULTTIMEOUT);
+*/
+static PyObject* 
+fp_downloadImage(PyObject* self, PyObject* args)
+{
+#define FINGERPRINT_DOWNLOADIMAGE  0x0A
+
+     uint32_t addr = 0xFFFFFFFF;
+     uint8_t packettype = FINGERPRINT_COMMANDPACKET;
+     uint8_t packet[] = { FINGERPRINT_DOWNLOADIMAGE };
+     uint8_t reply[20];
+     PyObject* output = PyList_New(0);
+     uint8_t type, payload, r;
+     int x = 0; 
+     int y = 0;
+     int i, len;
+
+printf("inside fp_downloadImage\n");
+
+     // initiate streaming transfer
+     AFP.writePacket( addr, packettype, sizeof(packet), packet );
+
+     // get status
+     memset(reply,0,sizeof(reply));
+     len = AFP.getReply( reply ); 
+     type = reply[0];
+     payload = reply[1];
+
+printf("waypoint 1\n");
+
+//     if ( (type != FINGERPRINT_ACKPACKET) ||  (payload != FINGERPRINT_OK) ) 
+     if ( type != FINGERPRINT_ACKPACKET )
+     {
+printf("type = 0x%02X, payload=0x%02X len=%d\n", type, payload, len );
+
+         PyErr_SetString(FpSensorError, "Unable to download image");                           
+         Py_DECREF( output );
+         return FpSensorError;
+     }
+         
+printf("waypoint 2\n");
+
+     while ( type != FINGERPRINT_ENDDATAPACKET ) {
+
+         memset(reply,0,sizeof(reply));
+         len = AFP.getReply( reply, 60 );
+         type = reply[0];
+
+         if ( type != FINGERPRINT_DATAPACKET && type != FINGERPRINT_ENDDATAPACKET )
+         {
+
+printf("2 type = 0x%02X, len=%d\n", type, len );
+
+             PyErr_SetString(FpSensorError, "Unexpected data type in octet stream ");    
+             Py_DECREF( output );
+             return FpSensorError;
+         }
+ 
+
+printf("got %d bytes\n", len);
+
+         x = 0;        
+         for(i = 1; i < len; i++) 
+         {         
+             int v = (reply[i] >> 4) * 17;
+
+             PyList_Append( output, Py_BuildValue("(i,i,i)", x, y, v ) ); 
+
+             x += 1;
+             v = (reply[i] & 0xFF) * 17;
+
+             PyList_Append( output, Py_BuildValue("(i,i,i)", x, y, v ) );
+
+             x += 1;
+         }
+         y += 1;
+ 
+    }
+
+  
+    return output;    
+}
+ 
 
 static PyMethodDef FPSensorMethods[] = {
 //    {"system",  spam_system, METH_VARARGS,  "Execute a shell command."},
@@ -400,6 +575,9 @@ static PyMethodDef FPSensorMethods[] = {
     {"captureImage", fp_getimage, METH_VARARGS, "captureImage(slot=1,timeout=10); get image and store in a buffer"},
 
     {"setup", fp_setup, METH_VARARGS, "setup( device=/dev/ttyAMA0, baud=57600 );"},
+    {"downloadImage", fp_downloadImage, METH_NOARGS, "retreive image data from flash as a bitstream"},
+    {"uploadTemplate", fp_uploadTemplate, METH_VARARGS, "upload a template from host machine."},
+
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

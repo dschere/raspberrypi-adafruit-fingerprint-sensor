@@ -48,6 +48,7 @@ uint8_t getFingerprintEnroll(HardwareSerial& Serial, Adafruit_Fingerprint& finge
       break;
     }
   }
+  //if (emit) emit("download-image");
 
   // OK success!
 
@@ -108,6 +109,10 @@ uint8_t getFingerprintEnroll(HardwareSerial& Serial, Adafruit_Fingerprint& finge
       break;
     }
   }
+
+  // while we are here ... we can capture the image bitmap on flash
+  // if our app wishes to.
+ // if (emit) emit("download-image"); 
 
   // OK success!
 

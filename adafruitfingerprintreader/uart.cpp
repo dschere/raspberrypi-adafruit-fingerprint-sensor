@@ -107,6 +107,8 @@ int HardwareSerial::available()
 
 void HardwareSerial::begin(unsigned long baudrate)
 {
+    _baud = baudrate;
+
     if ( uart0_filestream == -1 ) {
         fprintf(stderr,"HardwareSerial::begin() not connected to uart");
         error = 1;
@@ -163,6 +165,7 @@ int HardwareSerial::open(char* device)
         fprintf(stderr,"Unable to open ttyAMA0 errno=%d %s",
             errno, strerror(errno)); 
     }
+    strcpy(_device, device);
     return (uart0_filestream == -1) ? -1: 0;
 }
 
@@ -174,6 +177,14 @@ void HardwareSerial::close()
     }
 }
 
+int HardwareSerial::reset() {
+    close();
+    if ( open( _device ) == -1 ) {
+        return -1;
+    }
+    begin( _baud );
+    return 0;
+}
 
 
 

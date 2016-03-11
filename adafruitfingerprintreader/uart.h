@@ -15,7 +15,9 @@ void delay(int milli);
 class HardwareSerial
 {
     int uart0_filestream;
-    struct termios cfg;    
+    struct termios cfg;   
+    unsigned long _baud; 
+    char _device[256]; 
 public:
 
     HardwareSerial();
@@ -29,7 +31,7 @@ public:
     void write(uint8_t ch);
     int read();    
     int available();
-    
+    int reset();
     
     int error;
 

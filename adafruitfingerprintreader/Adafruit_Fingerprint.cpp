@@ -106,14 +106,19 @@ uint8_t Adafruit_Fingerprint::image2Tz(uint8_t slot) {
 
 
 uint8_t Adafruit_Fingerprint::createModel(void) {
-  uint8_t packet[] = {FINGERPRINT_REGMODEL};
-  writePacket(theAddress, FINGERPRINT_COMMANDPACKET, sizeof(packet)+2, packet);
+//  uint8_t packet[] = {FINGERPRINT_REGMODEL};
+  uint8_t packet[2];
+  packet[0] = FINGERPRINT_REGMODEL;
+  writePacket(theAddress, FINGERPRINT_COMMANDPACKET, 3, packet);
+  
+//  writePacket(theAddress, FINGERPRINT_COMMANDPACKET, sizeof(packet)+2, packet);
   uint8_t len = getReply(packet);
   
   if ((len != 1) && (packet[0] != FINGERPRINT_ACKPACKET))
    return -1;
   return packet[1];
 }
+
 
 
 uint8_t Adafruit_Fingerprint::storeModel(uint16_t id) {
@@ -129,13 +134,14 @@ uint8_t Adafruit_Fingerprint::storeModel(uint16_t id) {
 //read a fingerprint template from flash into Char Buffer 1
 uint8_t Adafruit_Fingerprint::loadModel(uint16_t id) {
     uint8_t packet[] = {FINGERPRINT_LOAD, 0x01, id >> 8, id & 0xFF};
+    uint8_t resp_packet[256];
     writePacket(theAddress, FINGERPRINT_COMMANDPACKET, sizeof(packet)+2, packet);
-    uint8_t len = getReply(packet);
+    uint8_t len = getReply(resp_packet);
     
-    if ((len != 1) && (packet[0] != FINGERPRINT_ACKPACKET)){
+    if ((len != 1) && (resp_packet[0] != FINGERPRINT_ACKPACKET)){
         return -1;
     }
-    return packet[1];
+    return resp_packet[1];
 }
 
 //transfer a fingerprint template from Char Buffer 1 to host computer
@@ -160,8 +166,13 @@ uint8_t Adafruit_Fingerprint::deleteModel(uint16_t id) {
 }
 
 uint8_t Adafruit_Fingerprint::emptyDatabase(void) {
-  uint8_t packet[] = {FINGERPRINT_EMPTY};
-  writePacket(theAddress, FINGERPRINT_COMMANDPACKET, sizeof(packet)+2, packet);
+//  uint8_t packet[] = {FINGERPRINT_EMPTY};
+   uint8_t packet[2];
+
+   packet[0] = FINGERPRINT_EMPTY;
+   writePacket(theAddress, FINGERPRINT_COMMANDPACKET, 3, packet);
+
+//  writePacket(theAddress, FINGERPRINT_COMMANDPACKET, sizeof(packet)+2, packet);
   uint8_t len = getReply(packet);
   
   if ((len != 1) && (packet[0] != FINGERPRINT_ACKPACKET))
@@ -287,7 +298,7 @@ void Adafruit_Fingerprint::writePacket(uint32_t addr, uint8_t packettype,
 
 
 uint8_t Adafruit_Fingerprint::getReply(uint8_t packet[], uint16_t timeout) {
-  uint8_t reply[20], idx;
+  uint8_t reply[256], idx;
   uint16_t timer=0;
   
   idx = 0;
@@ -322,15 +333,78 @@ while (true) {
       len -= 2;
       //Serial.print("Packet len"); Serial.println(len);
       if (idx <= (len+10)) continue;
+
+//printf("before set packet\n");
       packet[0] = packettype;      
+//printf("before set payload %d bytes \n", len);
       for (uint8_t i=0; i<len; i++) {
         packet[1+i] = reply[9+i];
       }
+
 #ifdef FINGERPRINT_DEBUG
       Serial.println();
 #endif
+//printf("return length \n");
       return len;
     }
   }
 }
+
+#define CHUNK_SIZE 20
+uint8_t Adafruit_Fingerprint::uploadModel(uint16_t id, uint8_t* model, uint16_t len)
+{
+    //uint8_t packet[] = {FINGERPRINT_MODEL_XFER,0x01};
+    uint8_t packet[256];
+
+
+
+    packet[0] = FINGERPRINT_MODEL_XFER;
+    packet[1] = 0x01; 
+
+//    writePacket(theAddress, FINGERPRINT_COMMANDPACKET, sizeof(packet)+2, packet);
+    writePacket(theAddress, FINGERPRINT_COMMANDPACKET, 4, packet);
+    uint8_t reply_len = getReply(packet);
+    uint16_t i, chunk_len;
+    uint8_t chunk[CHUNK_SIZE]; 
+
+
+
+    if (reply_len != 1) {
+        fprintf(stderr,"uploadModel: expected 2 byte reply got %d bytes packet[0]=0x%02x packet[1]=0x%02x\n", 
+           reply_len, packet[0], packet[1] );
+        return -1;
+    } 
+
+    if (packet[0] != FINGERPRINT_ACKPACKET) {
+        fprintf(stderr,"uploadModel: expected ACK, got %d", packet[0]);
+        return -1;
+    }
+
+    if (packet[1] != FINGERPRINT_OK) { 
+        fprintf(stderr,"uploadModel: expected payload = OK, got %d", packet[1]);
+        return -1;
+    }
+
+    // ready to begin serial xfer    
+    chunk_len = 0;
+    for(i = 0; i < len; i++) {
+         chunk[ chunk_len ] = model[i];
+         chunk_len++;
+
+         if ( i == (len-1) ) { // last byte
+             //printf("writing end packet\n");
+             writePacket(theAddress, FINGERPRINT_ENDDATAPACKET, chunk_len, chunk);  
+             
+         } else if (chunk_len == CHUNK_SIZE) {        
+             //printf("writing data packet\n");
+         
+             writePacket(theAddress, FINGERPRINT_DATAPACKET, chunk_len, chunk);
+             chunk_len = 0;
+         }
+    }
+    
+    printf("store model %d\n", id);  
+    return this->storeModel( id );
+}
+
 
